@@ -110,7 +110,7 @@ func (s *Store) GetUint64(key []byte) (val uint64, err error) {
 func (s *Store) FirstIndex() (res uint64, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(bucketLogs).Cursor()
-		if first, _ := cursor.Last(); len(first) != 0 {
+		if first, _ := cursor.First(); len(first) != 0 {
 			res = parseLogKey(first)
 		} else {
 			return ErrKeyNotFound
@@ -123,7 +123,7 @@ func (s *Store) FirstIndex() (res uint64, err error) {
 func (s *Store) LastIndex() (res uint64, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(bucketLogs).Cursor()
-		if first, _ := cursor.First(); len(first) != 0 {
+		if first, _ := cursor.Last(); len(first) != 0 {
 			res = parseLogKey(first)
 		} else {
 			return ErrKeyNotFound
@@ -152,7 +152,7 @@ func (s *Store) GetLogRange(from, to uint64) (logs []*raft.LogEntry, err error) 
 	err = s.db.View(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(bucketLogs).Cursor()
 		fromKey := buildLogKey(from)
-		for key, val := cursor.Seek(fromKey); len(key) > 0; key, val = cursor.Prev() {
+		for key, val := cursor.Seek(fromKey); len(key) > 0; key, val = cursor.Next() {
 			if len(key) == 0 {
 				break
 			}
@@ -191,7 +191,7 @@ func (s *Store) DeleteRange(from, to uint64) error {
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(bucketLogs).Cursor()
-		for key, _ := cursor.Seek(buildLogKey(from)); key != nil; key, _ = cursor.Prev() {
+		for key, _ := cursor.Seek(buildLogKey(from)); key != nil; key, _ = cursor.Next() {
 			if parseLogKey(key) > to {
 				break
 			}

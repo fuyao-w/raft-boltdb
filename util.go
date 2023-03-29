@@ -2,7 +2,6 @@ package raft_boltdb
 
 import (
 	"encoding/binary"
-	"math"
 	"strconv"
 
 	. "github.com/fuyao-w/common-util"
@@ -19,7 +18,7 @@ func bytes2Uint(b []byte) uint64 {
 // buildLogKey
 func buildLogKey(ts uint64) []byte {
 	out := make([]byte, 8)
-	binary.BigEndian.PutUint64(out, math.MaxUint64-ts)
+	binary.BigEndian.PutUint64(out, ts)
 	return out
 }
 
@@ -28,5 +27,5 @@ func parseLogKey(key []byte) uint64 {
 	if len(key) < 8 {
 		return 0
 	}
-	return math.MaxUint64 - binary.BigEndian.Uint64(key)
+	return binary.BigEndian.Uint64(key)
 }
