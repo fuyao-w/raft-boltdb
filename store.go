@@ -4,9 +4,8 @@ import (
 	"errors"
 
 	"github.com/boltdb/bolt"
-	. "github.com/fuyao-w/common-util"
+
 	raft "github.com/fuyao-w/go-raft"
-	"github.com/spf13/cast"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -59,24 +58,24 @@ func (s *Store) init() error {
 	})
 }
 
-func (s *Store) Get(key string) (val string, err error) {
+func (s *Store) Get(key []byte) (val []byte, err error) {
 	if len(key) == 0 {
-		return "", ErrKeyIsNil
+		return nil, ErrKeyIsNil
 	}
 	err = s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(bucketKV)
-		v := bucket.Get(Str2Bytes(key))
+		v := bucket.Get(key)
 		if len(v) == 0 {
 			return ErrKeyNotFound
 		}
-		val = Bytes2Str(append([]byte(nil), v...))
+		val = append([]byte(nil), v...)
 		return nil
 	})
 	return
 
 }
 
-func (s *Store) Set(key string, val string) (err error) {
+func (s *Store) Set(key []byte, val []byte) (err error) {
 	if len(key) == 0 {
 		return ErrKeyIsNil
 	}
@@ -86,18 +85,18 @@ func (s *Store) Set(key string, val string) (err error) {
 
 	return s.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(bucketKV)
-		return bucket.Put(Str2Bytes(key), Str2Bytes(val))
+		return bucket.Put(key, val)
 	})
 }
 
-func (s *Store) SetUint64(key string, val uint64) error {
+func (s *Store) SetUint64(key []byte, val uint64) error {
 	if len(key) == 0 {
 		return ErrKeyIsNil
 	}
-	return s.Set(key, Bytes2Str(uint2Bytes(val)))
+	return s.Set(key, uint2Bytes(val))
 }
 
-func (s *Store) GetUint64(key string) (val uint64, err error) {
+func (s *Store) GetUint64(key []byte) (val uint64, err error) {
 	if len(key) == 0 {
 		return 0, ErrKeyIsNil
 	}
@@ -105,14 +104,14 @@ func (s *Store) GetUint64(key string) (val uint64, err error) {
 	if err != nil {
 		return
 	}
-	return bytes2Uint(Str2Bytes(v)), nil
+	return bytes2Uint(v), nil
 }
 
 func (s *Store) FirstIndex() (res uint64, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(bucketLogs).Cursor()
-		if first, _ := cursor.First(); len(first) != 0 {
-			res = cast.ToUint64(first)
+		if first, _ := cursor.Last(); len(first) != 0 {
+			res = parseLogKey(first)
 		} else {
 			return ErrKeyNotFound
 		}
@@ -124,8 +123,8 @@ func (s *Store) FirstIndex() (res uint64, err error) {
 func (s *Store) LastIndex() (res uint64, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(bucketLogs).Cursor()
-		if first, _ := cursor.Last(); len(first) != 0 {
-			res = cast.ToUint64(first)
+		if first, _ := cursor.First(); len(first) != 0 {
+			res = parseLogKey(first)
 		} else {
 			return ErrKeyNotFound
 		}
@@ -136,7 +135,7 @@ func (s *Store) LastIndex() (res uint64, err error) {
 
 func (s *Store) GetLog(index uint64) (log *raft.LogEntry, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
-		result := tx.Bucket(bucketLogs).Get(uint2Bytes(index))
+		result := tx.Bucket(bucketLogs).Get(buildLogKey(index))
 		if len(result) == 0 {
 			return ErrKeyNotFound
 		}
@@ -152,12 +151,12 @@ func (s *Store) GetLogRange(from, to uint64) (logs []*raft.LogEntry, err error) 
 	}
 	err = s.db.View(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(bucketLogs).Cursor()
-		fromKey := uint2Bytes(from)
-		for key, val := cursor.Seek(fromKey); len(key) > 0; key, val = cursor.Next() {
+		fromKey := buildLogKey(from)
+		for key, val := cursor.Seek(fromKey); len(key) > 0; key, val = cursor.Prev() {
 			if len(key) == 0 {
 				break
 			}
-			if bytes2Uint(key) <= to {
+			if parseLogKey(key) <= to {
 				var log raft.LogEntry
 				_ = msgpack.Unmarshal(val, &log)
 				logs = append(logs, &log)
@@ -171,7 +170,7 @@ func (s *Store) GetLogRange(from, to uint64) (logs []*raft.LogEntry, err error) 
 func (s *Store) SetLogs(logs []*raft.LogEntry) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		for _, log := range logs {
-			key := uint2Bytes(log.Index)
+			key := buildLogKey(log.Index)
 			val, err := msgpack.Marshal(log)
 			if err != nil {
 				return err
@@ -192,8 +191,8 @@ func (s *Store) DeleteRange(from, to uint64) error {
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(bucketLogs).Cursor()
-		for key, _ := cursor.Seek(uint2Bytes(from)); key != nil; key, _ = cursor.Next() {
-			if bytes2Uint(key) > to {
+		for key, _ := cursor.Seek(buildLogKey(from)); key != nil; key, _ = cursor.Prev() {
+			if parseLogKey(key) > to {
 				break
 			}
 			if err := cursor.Delete(); err != nil {

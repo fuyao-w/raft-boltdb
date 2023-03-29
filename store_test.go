@@ -1,79 +1,113 @@
 package raft_boltdb
 
 import (
-	"encoding/json"
 	"github.com/boltdb/bolt"
 	raft "github.com/fuyao-w/go-raft"
 	"os"
 	"testing"
 	"time"
+
+	"fmt"
+	. "github.com/smartystreets/goconvey/convey"
+	"reflect"
 )
 
 func TestKVStore(t *testing.T) {
-	filePath := "test.db"
-	got, err := NewStore(filePath, bolt.DefaultOptions, true)
+	path := "test"
+	store, err := NewStore(path, bolt.DefaultOptions, true)
 	if err != nil {
-		t.Errorf("NewStore() error = %v", err)
-		return
-	}
-	defer os.Remove(filePath)
-
-	if err = got.Set("age", "15"); err != nil {
 		t.Fatal(err)
 	}
-	t.Log(got.Get("age"))
+	defer os.Remove(path)
+	Convey("set unit", t, func() {
+		So(store.SetUint64([]byte("age"), 15), ShouldBeNil)
+		val, err := store.GetUint64([]byte("age"))
+		So(err, ShouldBeNil)
+		So(val, ShouldEqual, 15)
 
-	if err = got.SetUint64("height", 15); err != nil {
-		t.Fatal(err)
-	}
-	t.Log(got.GetUint64("height"))
-	t.Log(got.Sync())
-
-	t.Log(got.Get("sss"))
-	t.Log(got.GetUint64("sss"))
+	})
+	Convey("set log", t, func() {
+		log := &raft.LogEntry{
+			Type:      1,
+			Index:     100,
+			Term:      1,
+			Data:      []byte("abc"),
+			CreatedAt: time.Now(),
+		}
+		So(store.SetLogs([]*raft.LogEntry{log}), ShouldBeNil)
+		logResp, err := store.GetLog(100)
+		So(err, ShouldBeNil)
+		So(deepEqual(log, logResp), ShouldBeTrue)
+	})
 
 }
 
-func TestLogStore(t *testing.T) {
-	print := func(i any) string {
-		data, _ := json.Marshal(i)
-		return string(data)
-	}
-	filePath := "test.db"
-	store, err := NewStore(filePath, bolt.DefaultOptions, true)
-	if err != nil {
-		t.Errorf("NewStore() error = %v", err)
-		return
-	}
-	defer os.Remove(filePath)
-	t.Log(store.SetLogs([]*raft.LogEntry{
-		{
-			Type:      1,
-			Index:     1,
-			Term:      1,
-			Data:      []byte(`{"age" : 15}`),
-			DataV2:    "",
-			CreatedAt: time.Now(),
-		},
-	}))
-	log, err := store.GetLog(1)
-	t.Log(print(log), err)
+func deepEqual(a, b *raft.LogEntry) bool {
+	return a.Term == b.Term && a.Index == b.Index && reflect.DeepEqual(a.Data, b.Data) && a.CreatedAt.Unix() == b.CreatedAt.Unix()
+}
 
-	t.Log(store.SetLogs([]*raft.LogEntry{
+func TestLogRange(t *testing.T) {
+	defer os.Remove("test")
+	type testCase struct {
+		From, To uint64
+	}
+	var testList = []testCase{
 		{
-			Type:      1,
-			Index:     2,
-			Term:      1,
-			Data:      []byte(`{"age" : 16}`),
-			DataV2:    "",
-			CreatedAt: time.Now(),
+			1, 99,
 		},
-	}))
-	logs, err := store.GetLogRange(1, 2)
-	t.Log(print(logs), err)
+		{
+			15, 99,
+		},
+		{
+			15, 110,
+		},
+	}
+	Convey("get range", t, func() {
+		for i, tc := range testList {
+			Convey(fmt.Sprintf("case %d", i), func() {
+				store, err := NewStore("test", bolt.DefaultOptions, true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer store.Close()
+				var logs []*raft.LogEntry
+				for i := tc.From; i <= tc.To; i++ {
+					logs = append(logs, &raft.LogEntry{
+						Type:  1,
+						Index: i,
+						Term:  1,
+						Data:  nil,
+					})
+				}
+				So(store.SetLogs(logs), ShouldBeNil)
 
-	store.DeleteRange(1, 2)
-	logs, err = store.GetLogRange(1, 2)
-	t.Log(print(logs), err)
-	t.Log(store.GetLog(199))
+				idx, err := store.FirstIndex()
+
+				So(err, ShouldBeNil)
+				So(idx, ShouldEqual, tc.From)
+
+				idx, err = store.LastIndex()
+				So(err, ShouldBeNil)
+				So(idx, ShouldEqual, tc.To)
+
+				logs, err = store.GetLogRange(tc.From, tc.To)
+				So(err, ShouldBeNil)
+				So(len(logs), ShouldEqual, tc.To-tc.From+1)
+
+				for i := tc.From; i <= tc.To; i++ {
+					log, err := store.GetLog(i)
+					So(err, ShouldBeNil)
+					So(log.Index, ShouldEqual, i)
+				}
+
+				store.DeleteRange(tc.From, tc.To)
+				for i := tc.From; i <= tc.To; i++ {
+					_, err := store.GetLog(i)
+					So(err, ShouldEqual, ErrKeyNotFound)
+				}
+			})
+
+		}
+
+	})
 }
