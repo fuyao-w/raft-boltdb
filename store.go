@@ -2,10 +2,9 @@ package raft_boltdb
 
 import (
 	"errors"
-
 	"github.com/boltdb/bolt"
 
-	raft "github.com/fuyao-w/go-raft"
+	raft "github.com/fuyao-w/papillon"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -14,12 +13,12 @@ const (
 )
 
 var (
-	bucketLogs     = []byte("logs")
-	bucketKV       = []byte("kv")
-	ErrKeyNotFound = errors.New("not found")
-	ErrKeyIsNil    = errors.New("key is nil")
-	ErrValueIsNil  = errors.New("value is nil")
-	ErrRange       = errors.New("from must no bigger than to")
+	bucketLogs    = []byte("logs")
+	bucketKV      = []byte("kv")
+	ErrNotFound   = errors.New("not found")
+	ErrKeyIsNil   = errors.New("key is nil")
+	ErrValueIsNil = errors.New("value is nil")
+	ErrRange      = errors.New("from must no bigger than to")
 )
 
 type Store struct {
@@ -66,7 +65,7 @@ func (s *Store) Get(key []byte) (val []byte, err error) {
 		bucket := tx.Bucket(bucketKV)
 		v := bucket.Get(key)
 		if len(v) == 0 {
-			return ErrKeyNotFound
+			return ErrNotFound
 		}
 		val = append([]byte(nil), v...)
 		return nil
@@ -112,8 +111,6 @@ func (s *Store) FirstIndex() (res uint64, err error) {
 		cursor := tx.Bucket(bucketLogs).Cursor()
 		if first, _ := cursor.First(); len(first) != 0 {
 			res = parseLogKey(first)
-		} else {
-			return ErrKeyNotFound
 		}
 		return nil
 	})
@@ -125,8 +122,6 @@ func (s *Store) LastIndex() (res uint64, err error) {
 		cursor := tx.Bucket(bucketLogs).Cursor()
 		if first, _ := cursor.Last(); len(first) != 0 {
 			res = parseLogKey(first)
-		} else {
-			return ErrKeyNotFound
 		}
 		return nil
 	})
@@ -134,10 +129,14 @@ func (s *Store) LastIndex() (res uint64, err error) {
 }
 
 func (s *Store) GetLog(index uint64) (log *raft.LogEntry, err error) {
+	//defer func(begin int64) {
+	//	fmt.Println("get log cost :", time.Now().UnixMilli()-begin, index)
+	//}(time.Now().UnixMilli())
+	//time.Sleep(time.Millisecond * 20)
 	err = s.db.View(func(tx *bolt.Tx) error {
 		result := tx.Bucket(bucketLogs).Get(buildLogKey(index))
 		if len(result) == 0 {
-			return ErrKeyNotFound
+			return ErrNotFound
 		}
 		_ = msgpack.Unmarshal(result, &log)
 		return nil

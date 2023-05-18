@@ -2,7 +2,7 @@ package raft_boltdb
 
 import (
 	"github.com/boltdb/bolt"
-	raft "github.com/fuyao-w/go-raft"
+	raft "github.com/fuyao-w/papillon"
 	"os"
 	"testing"
 	"time"
@@ -103,7 +103,7 @@ func TestLogRange(t *testing.T) {
 				store.DeleteRange(tc.From, tc.To)
 				for i := tc.From; i <= tc.To; i++ {
 					_, err := store.GetLog(i)
-					So(err, ShouldEqual, ErrKeyNotFound)
+					So(err, ShouldEqual, ErrNotFound)
 				}
 			})
 
